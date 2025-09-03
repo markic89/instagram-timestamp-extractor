@@ -47,7 +47,7 @@ def get_instagram_timestamp_via_instaloader(post_url: str) -> str:
         return "ERROR_BAD_URL"
     shortcode = m.group(1)
     try:
-        time.sleep(2)
+        time.sleep(12)
         post = instaloader.Post.from_shortcode(L.context, shortcode)
     except instaloader.exceptions.QueryReturnedNotFoundException:
         return "ERROR_NOT_FOUND"
