@@ -3,18 +3,19 @@
 
 import streamlit as st
 import pandas as pd
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
 from datetime import datetime
 from tqdm.auto import tqdm
 import random
 import time
 import io
 import base64
+import json
 from streamlit.components.v1 import html
 
 st.set_page_config(page_title="Instagram Timestamp Extractor", layout="centered")
@@ -42,41 +43,42 @@ def init_driver():
 
 driver = init_driver()
 
-# Helper: Extract timestamp from URL using Selenium
+# Helper: Extract timestamp from URL using Selenium and JSON parsing
 def get_instagram_timestamp_via_selenium(url: str) -> str:
     try:
         # Navigate to URL
         driver.get(url)
         # Wait for page to load with extra delay
         time.sleep(random.uniform(5, 10))
-        # Scroll multiple times to load metadata
+        # Scroll to load metadata
         for _ in range(4):
             driver.execute_script("window.scrollBy(0, 500);")
             time.sleep(random.uniform(2, 4))
-        # Wait for time element with datetime attribute
-        time_element = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, "//time[@datetime]"))
-        )
-        datetime_str = time_element.get_attribute("datetime")
-        if not datetime_str:
-            return "NO DATETIME ATTR"
-        dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception as e:
-        # Fallback using BeautifulSoup and class-based search
-        try:
-            time.sleep(random.uniform(2, 5))
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            time_tag = soup.find("time", class_="x1p4m5qa")
-            if not time_tag:
-                return "NO <time> TAG"
-            datetime_str = time_tag.get("datetime")
-            if not datetime_str:
-                return "NO DATETIME ATTR"
+        # Wait for page content
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        # Extract page source and search for JSON data
+        page_source = driver.page_source
+        # Look for Instagram's embedded JSON (common pattern)
+        json_match = re.search(r'window\.__additionalDataLoaded\((.*?)\);', page_source)
+        if json_match:
+            json_data = json.loads(json_match.group(1))
+            # Navigate to post data (adjust based on structure)
+            if "data" in json_data and "graphql" in json_data["data"]:
+                post_data = json_data["data"]["graphql"]["shortcode_media"]
+                timestamp = post_data.get("taken_at_timestamp")
+                if timestamp:
+                    dt = datetime.fromtimestamp(timestamp)
+                    return dt.strftime("%Y-%m-%d %H:%M:%S")
+        # Fallback to HTML if JSON fails
+        soup = BeautifulSoup(page_source, "html.parser")
+        time_tag = soup.find("time", {"datetime": True})
+        if time_tag:
+            datetime_str = time_tag["datetime"]
             dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
             return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception as e2:
-            return f"ERROR: {str(e)} or {str(e2)}"
+        return "NO TIMESTAMP FOUND"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
 
 # File uploader for CSV input
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
