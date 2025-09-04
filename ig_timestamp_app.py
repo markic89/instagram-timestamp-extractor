@@ -22,21 +22,14 @@ st.title("Instagram Timestamp Extractor")
 st.markdown(
     """
     **Instructions**:  
-    1. Enter Instagram credentials (optional for private posts).  
-    2. Upload a CSV with Instagram URLs (and optional Influencer Names).  
-    3. Click "Extract Timestamps."  
-    4. The output CSVs will automatically download at the end.  
+    1. Upload a CSV with Instagram URLs (and optional Influencer Names).  
+    2. Click "Extract Timestamps."  
+    3. The output CSVs will automatically download at the end.  
     *Example*: `Influencer Name,url` or just `url` (with or without headers).  
     """
 )
 
-# Form for Instagram credentials (optional)
-username = st.text_input("Instagram Username (optional)", type="password")
-password = st.text_input("Instagram Password (optional)", type="password")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1) Initialize Selenium driver with headless Chrome
-# ─────────────────────────────────────────────────────────────────────────────
+# Initialize Selenium driver with headless Chrome
 @st.cache_resource
 def init_driver():
     options = Options()
@@ -49,50 +42,43 @@ def init_driver():
 
 driver = init_driver()
 
-# Login if credentials provided
-if username and password and st.button("Login to Instagram"):
-    with st.spinner("Logging in..."):
-        driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(random.uniform(2, 5))  # Human-like delay
-        try:
-            user_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
-            user_input.send_keys(username)
-            pass_input = driver.find_element(By.NAME, "password")
-            pass_input.send_keys(password)
-            pass_input.submit()
-            time.sleep(random.uniform(5, 10))
-            if "challenge" in driver.current_url or "suspicious" in driver.current_url:
-                st.error("Login challenge detected. Complete it in a browser or try later.")
-            else:
-                st.success("Logged in successfully!")
-        except Exception as e:
-            st.error(f"Login failed: {e}")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2) Helper: Extract timestamp from URL using Selenium
-# ─────────────────────────────────────────────────────────────────────────────
+# Helper: Extract timestamp from URL using Selenium
 def get_instagram_timestamp_via_selenium(url: str) -> str:
     try:
+        # Navigate to URL
         driver.get(url)
-        time.sleep(random.uniform(3, 6))  # Mimic human loading time
-        # Scroll to mimic human behavior
-        driver.execute_script("window.scrollBy(0, 200);")
-        time.sleep(random.uniform(1, 3))
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        time_tag = soup.find("time")
-        if not time_tag:
-            return "NO <time> TAG"
-        iso_ts = time_tag.get("datetime")
-        if not iso_ts:
+        # Wait for page to load with extra delay
+        time.sleep(random.uniform(5, 10))
+        # Scroll multiple times to load metadata
+        for _ in range(4):
+            driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(random.uniform(2, 4))
+        # Wait for time element with datetime attribute
+        time_element = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.XPATH, "//time[@datetime]"))
+        )
+        datetime_str = time_element.get_attribute("datetime")
+        if not datetime_str:
             return "NO DATETIME ATTR"
-        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except Exception as e:
-        return f"ERROR: {e}"
+        # Fallback using BeautifulSoup and class-based search
+        try:
+            time.sleep(random.uniform(2, 5))
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            time_tag = soup.find("time", class_="x1p4m5qa")
+            if not time_tag:
+                return "NO <time> TAG"
+            datetime_str = time_tag.get("datetime")
+            if not datetime_str:
+                return "NO DATETIME ATTR"
+            dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception as e2:
+            return f"ERROR: {str(e)} or {str(e2)}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3) File uploader for CSV input
-# ─────────────────────────────────────────────────────────────────────────────
+# File uploader for CSV input
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if uploaded_file is not None:
@@ -161,12 +147,12 @@ if uploaded_file is not None:
                 <script>
                     function download_file(name, contents) {{
                         const a = document.createElement('a');
-                        a.href = contents;
+                        a.href = 'data:text/csv;base64,' + contents;
                         a.download = name;
                         a.click();
                     }}
-                    download_file('ig_timestamps_success.csv', 'data:text/csv;base64,{success_b64}');
-                    download_file('ig_timestamps_errors.csv', 'data:text/csv;base64,{errors_b64}');
+                    download_file('ig_timestamps_success.csv', '{success_b64}');
+                    download_file('ig_timestamps_errors.csv', '{errors_b64}');
                 </script>
                 """,
                 height=0
@@ -174,4 +160,4 @@ if uploaded_file is not None:
 else:
     st.info("Upload a CSV to start.")
 
-st.markdown("**Note**: Only public posts work without login. Random delays mimic human behavior.")
+st.markdown("**Note**: Only public posts work. Random delays mimic human behavior.")
