@@ -5,8 +5,6 @@ import streamlit as st
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -16,6 +14,8 @@ from tqdm.auto import tqdm
 import random
 import time
 import io
+import base64
+from streamlit.components.v1 import html
 
 st.set_page_config(page_title="Instagram Timestamp Extractor", layout="centered")
 st.title("Instagram Timestamp Extractor")
@@ -25,7 +25,7 @@ st.markdown(
     1. Enter Instagram credentials (optional for private posts).  
     2. Upload a CSV with Instagram URLs (and optional Influencer Names).  
     3. Click "Extract Timestamps."  
-    4. Download the two output CSVs.  
+    4. The output CSVs will automatically download at the end.  
     *Example*: `Influencer Name,url` or just `url` (with or without headers).  
     """
 )
@@ -34,7 +34,9 @@ st.markdown(
 username = st.text_input("Instagram Username (optional)", type="password")
 password = st.text_input("Instagram Password (optional)", type="password")
 
-# Initialize Selenium driver with webdriver-manager
+# ─────────────────────────────────────────────────────────────────────────────
+# 1) Initialize Selenium driver with headless Chrome
+# ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
 def init_driver():
     options = Options()
@@ -42,8 +44,7 @@ def init_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
-    service = ChromeService(executable_path=ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(options=options)
     return driver
 
 driver = init_driver()
@@ -52,7 +53,7 @@ driver = init_driver()
 if username and password and st.button("Login to Instagram"):
     with st.spinner("Logging in..."):
         driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(random.uniform(2, 5))
+        time.sleep(random.uniform(2, 5))  # Human-like delay
         try:
             user_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
             user_input.send_keys(username)
@@ -67,10 +68,14 @@ if username and password and st.button("Login to Instagram"):
         except Exception as e:
             st.error(f"Login failed: {e}")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2) Helper: Extract timestamp from URL using Selenium
+# ─────────────────────────────────────────────────────────────────────────────
 def get_instagram_timestamp_via_selenium(url: str) -> str:
     try:
         driver.get(url)
-        time.sleep(random.uniform(3, 6))
+        time.sleep(random.uniform(3, 6))  # Mimic human loading time
+        # Scroll to mimic human behavior
         driver.execute_script("window.scrollBy(0, 200);")
         time.sleep(random.uniform(1, 3))
         soup = BeautifulSoup(driver.page_source, "html.parser")
@@ -85,6 +90,9 @@ def get_instagram_timestamp_via_selenium(url: str) -> str:
     except Exception as e:
         return f"ERROR: {e}"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 3) File uploader for CSV input
+# ─────────────────────────────────────────────────────────────────────────────
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if uploaded_file is not None:
@@ -127,7 +135,7 @@ if uploaded_file is not None:
                 ts = get_instagram_timestamp_via_selenium(u)
                 timestamps.append(ts)
                 progress_bar.progress((idx + 1) / len(df_urls))
-                time.sleep(random.uniform(5, 10))
+                time.sleep(random.uniform(5, 10))  # Extra delay for human mimicry
 
             df_urls["timestamp"] = timestamps
             df_success = df_urls[~df_urls["timestamp"].str.startswith("ERROR")]
@@ -141,20 +149,27 @@ if uploaded_file is not None:
                 st.subheader("Errors")
                 st.dataframe(df_errors, use_container_width=True)
 
+            # Automatic download using JavaScript
             success_csv = df_success.to_csv(index=False).encode("utf-8")
             errors_csv = df_errors.to_csv(index=False).encode("utf-8")
 
-            st.download_button(
-                label="Download Successful Timestamps",
-                data=success_csv,
-                file_name="ig_timestamps_success.csv",
-                mime="text/csv",
-            )
-            st.download_button(
-                label="Download Errors",
-                data=errors_csv,
-                file_name="ig_timestamps_errors.csv",
-                mime="text/csv",
+            success_b64 = base64.b64encode(success_csv).decode()
+            errors_b64 = base64.b64encode(errors_csv).decode()
+
+            html(
+                f"""
+                <script>
+                    function download_file(name, contents) {{
+                        const a = document.createElement('a');
+                        a.href = contents;
+                        a.download = name;
+                        a.click();
+                    }}
+                    download_file('ig_timestamps_success.csv', 'data:text/csv;base64,{success_b64}');
+                    download_file('ig_timestamps_errors.csv', 'data:text/csv;base64,{errors_b64}');
+                </script>
+                """,
+                height=0
             )
 else:
     st.info("Upload a CSV to start.")
