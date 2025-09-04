@@ -1,4 +1,5 @@
 streamlit
-instaloader
-pandas
+selenium
+beautifulsoup4
+webdriver-manager
 tqdm
